@@ -1,12 +1,15 @@
+"""VectorStore wrapper around a Postgres/PGVector database."""
+from __future__ import annotations
+
 import enum
 import logging
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import sqlalchemy
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, Session, declarative_base, relationship
+from sqlalchemy.orm import Session, declarative_base, relationship
 
 from langchain.docstore.document import Document
 from langchain.embeddings.base import Embeddings
@@ -39,7 +42,7 @@ class CollectionStore(BaseModel):
 
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> Optional["CollectionStore"]:
-        return session.query(cls).filter(cls.name == name).first()
+        return session.query(cls).filter(cls.name == name).first()  # type: ignore
 
     @classmethod
     def get_or_create(
@@ -67,7 +70,7 @@ class CollectionStore(BaseModel):
 class EmbeddingStore(BaseModel):
     __tablename__ = "langchain_pg_embedding"
 
-    collection_id: Mapped[UUID] = sqlalchemy.Column(
+    collection_id = sqlalchemy.Column(
         UUID(as_uuid=True),
         sqlalchemy.ForeignKey(
             f"{CollectionStore.__tablename__}.uuid",
@@ -161,10 +164,12 @@ class PGVector(VectorStore):
             self.logger.exception(e)
 
     def create_tables_if_not_exists(self) -> None:
-        Base.metadata.create_all(self._conn)
+        with self._conn.begin():
+            Base.metadata.create_all(self._conn)
 
     def drop_tables(self) -> None:
-        Base.metadata.drop_all(self._conn)
+        with self._conn.begin():
+            Base.metadata.drop_all(self._conn)
 
     def create_collection(self) -> None:
         if self.pre_delete_collection:
@@ -179,7 +184,7 @@ class PGVector(VectorStore):
         with Session(self._conn) as session:
             collection = self.get_collection(session)
             if not collection:
-                self.logger.error("Collection not found")
+                self.logger.warning("Collection not found")
                 return
             session.delete(collection)
             session.commit()
@@ -291,8 +296,18 @@ class PGVector(VectorStore):
         if filter is not None:
             filter_clauses = []
             for key, value in filter.items():
-                filter_by_metadata = EmbeddingStore.cmetadata[key].astext == str(value)
-                filter_clauses.append(filter_by_metadata)
+                IN = "in"
+                if isinstance(value, dict) and IN in map(str.lower, value):
+                    value_case_insensitive = {k.lower(): v for k, v in value.items()}
+                    filter_by_metadata = EmbeddingStore.cmetadata[key].astext.in_(
+                        value_case_insensitive[IN]
+                    )
+                    filter_clauses.append(filter_by_metadata)
+                else:
+                    filter_by_metadata = EmbeddingStore.cmetadata[key].astext == str(
+                        value
+                    )
+                    filter_clauses.append(filter_by_metadata)
 
             filter_by = sqlalchemy.and_(filter_by, *filter_clauses)
 
@@ -346,7 +361,7 @@ class PGVector(VectorStore):
 
     @classmethod
     def from_texts(
-        cls,
+        cls: Type[PGVector],
         texts: List[str],
         embedding: Embeddings,
         metadatas: Optional[List[dict]] = None,
@@ -355,7 +370,7 @@ class PGVector(VectorStore):
         ids: Optional[List[str]] = None,
         pre_delete_collection: bool = False,
         **kwargs: Any,
-    ) -> "PGVector":
+    ) -> PGVector:
         """
         Return VectorStore initialized from texts and embeddings.
         Postgres connection string is required
@@ -395,7 +410,7 @@ class PGVector(VectorStore):
 
     @classmethod
     def from_documents(
-        cls,
+        cls: Type[PGVector],
         documents: List[Document],
         embedding: Embeddings,
         collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
@@ -403,7 +418,7 @@ class PGVector(VectorStore):
         ids: Optional[List[str]] = None,
         pre_delete_collection: bool = False,
         **kwargs: Any,
-    ) -> "PGVector":
+    ) -> PGVector:
         """
         Return VectorStore initialized from documents and embeddings.
         Postgres connection string is required
