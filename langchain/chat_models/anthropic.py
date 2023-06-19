@@ -1,7 +1,5 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import Extra
-
 from langchain.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -28,20 +26,20 @@ class ChatAnthropic(BaseChatModel, _AnthropicCommon):
 
     Example:
         .. code-block:: python
+
             import anthropic
             from langchain.llms import Anthropic
             model = ChatAnthropic(model="<model_name>", anthropic_api_key="my-api-key")
     """
 
-    class Config:
-        """Configuration for this pydantic object."""
-
-        extra = Extra.forbid
-
     @property
     def _llm_type(self) -> str:
         """Return type of chat model."""
         return "anthropic-chat"
+
+    @property
+    def lc_serializable(self) -> bool:
+        return True
 
     def _convert_one_message_to_text(self, message: BaseMessage) -> str:
         if isinstance(message, ChatMessage):
@@ -93,9 +91,10 @@ class ChatAnthropic(BaseChatModel, _AnthropicCommon):
         messages: List[BaseMessage],
         stop: Optional[List[str]] = None,
         run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
     ) -> ChatResult:
         prompt = self._convert_messages_to_prompt(messages)
-        params: Dict[str, Any] = {"prompt": prompt, **self._default_params}
+        params: Dict[str, Any] = {"prompt": prompt, **self._default_params, **kwargs}
         if stop:
             params["stop_sequences"] = stop
 
@@ -120,9 +119,10 @@ class ChatAnthropic(BaseChatModel, _AnthropicCommon):
         messages: List[BaseMessage],
         stop: Optional[List[str]] = None,
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
     ) -> ChatResult:
         prompt = self._convert_messages_to_prompt(messages)
-        params: Dict[str, Any] = {"prompt": prompt, **self._default_params}
+        params: Dict[str, Any] = {"prompt": prompt, **self._default_params, **kwargs}
         if stop:
             params["stop_sequences"] = stop
 
