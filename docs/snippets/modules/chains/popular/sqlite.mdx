@@ -1,4 +1,4 @@
-Under the hood, LangChain uses SQLAlchemy to connect to SQL databases. The `SQLDatabaseChain` can therefore be used with any SQL dialect supported by SQLAlchemy, such as MS SQL, MySQL, MariaDB, PostgreSQL, Oracle SQL, [Databricks](../../../ecosystem/integrations/databricks.html) and SQLite. Please refer to the SQLAlchemy documentation for more information about requirements for connecting to your database. For example, a connection to MySQL requires an appropriate connector such as PyMySQL. A URI for a MySQL connection might look like: `mysql+pymysql://user:pass@some_mysql_db_address/db_name`.
+Under the hood, LangChain uses SQLAlchemy to connect to SQL databases. The `SQLDatabaseChain` can therefore be used with any SQL dialect supported by SQLAlchemy, such as MS SQL, MySQL, MariaDB, PostgreSQL, Oracle SQL, [Databricks](/docs/ecosystem/integrations/databricks.html) and SQLite. Please refer to the SQLAlchemy documentation for more information about requirements for connecting to your database. For example, a connection to MySQL requires an appropriate connector such as PyMySQL. A URI for a MySQL connection might look like: `mysql+pymysql://user:pass@some_mysql_db_address/db_name`.
 
 This demonstration uses SQLite and the example Chinook database.
 To set it up, follow the instructions on https://database.guide/2-sample-databases-sqlite/, placing the `.db` file in a notebooks folder at the root of this repository.
@@ -446,6 +446,30 @@ db_chain.run("What are some example tracks by Bach?")
 ```
 
 </CodeOutputBlock>
+
+### SQL Views
+
+In some case, the table schema can be hidden behind a JSON or JSONB column. Adding row samples into the prompt might help won't always describe the data perfectly. 
+
+For this reason, a custom SQL views can help.
+
+```sql
+CREATE VIEW accounts_v AS
+    select id, firstname, lastname, email, created_at, updated_at,
+        cast(stats->>'total_post' as int) as total_post,
+        cast(stats->>'total_comments' as int) as total_comments,
+        cast(stats->>'ltv' as int) as ltv
+
+        FROM accounts;
+```
+
+Then limit the tables visible from SQLDatabase to the created view.
+
+```python
+db = SQLDatabase.from_uri(
+    "sqlite:///../../../../notebooks/Chinook.db",
+    include_tables=['accounts_v']) # we include only the view
+```
 
 ## SQLDatabaseSequentialChain
 
