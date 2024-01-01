@@ -1,9 +1,10 @@
 """Callback Handler that writes to a file."""
 from typing import Any, Dict, Optional, TextIO, cast
 
+from langchain_core.agents import AgentAction, AgentFinish
+from langchain_core.utils.input import print_text
+
 from langchain.callbacks.base import BaseCallbackHandler
-from langchain.schema import AgentAction, AgentFinish
-from langchain.utils.input import print_text
 
 
 class FileCallbackHandler(BaseCallbackHandler):
@@ -13,7 +14,7 @@ class FileCallbackHandler(BaseCallbackHandler):
         self, filename: str, mode: str = "a", color: Optional[str] = None
     ) -> None:
         """Initialize callback handler."""
-        self.file = cast(TextIO, open(filename, mode))
+        self.file = cast(TextIO, open(filename, mode, encoding="utf-8"))
         self.color = color
 
     def __del__(self) -> None:
