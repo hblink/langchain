@@ -6,6 +6,7 @@ _EXPECTED = [
     "AlibabaCloudOpenSearchSettings",
     "AnalyticDB",
     "Annoy",
+    "ApacheDoris",
     "AtlasDB",
     "AwaDB",
     "AzureSearch",
@@ -27,8 +28,11 @@ _EXPECTED = [
     "ElasticsearchStore",
     "Epsilla",
     "FAISS",
+    "HanaDB",
     "Hologres",
+    "KDBAI",
     "LanceDB",
+    "Lantern",
     "LLMRails",
     "Marqo",
     "MatchingEngine",
@@ -71,6 +75,7 @@ _EXPECTED = [
     "AzureCosmosDBVectorSearch",
     "VectorStore",
     "Yellowbrick",
+    "NeuralDBVectorStore",
 ]
 
 

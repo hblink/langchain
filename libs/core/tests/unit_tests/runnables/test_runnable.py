@@ -66,9 +66,10 @@ from langchain_core.runnables import (
     RunnablePassthrough,
     RunnablePick,
     RunnableSequence,
-    RunnableWithFallbacks,
     add,
+    chain,
 )
+from langchain_core.runnables.base import RunnableSerializable
 from langchain_core.tools import BaseTool, tool
 from langchain_core.tracers import (
     BaseTracer,
@@ -101,15 +102,28 @@ class FakeTracer(BaseTracer):
         return self.uuids_map[uuid]
 
     def _copy_run(self, run: Run) -> Run:
+        if run.dotted_order:
+            levels = run.dotted_order.split(".")
+            processed_levels = []
+            for level in levels:
+                timestamp, run_id = level.split("Z")
+                new_run_id = self._replace_uuid(UUID(run_id))
+                processed_level = f"{timestamp}Z{new_run_id}"
+                processed_levels.append(processed_level)
+            new_dotted_order = ".".join(processed_levels)
+        else:
+            new_dotted_order = None
         return run.copy(
             update={
                 "id": self._replace_uuid(run.id),
-                "parent_run_id": self.uuids_map[run.parent_run_id]
-                if run.parent_run_id
-                else None,
+                "parent_run_id": (
+                    self.uuids_map[run.parent_run_id] if run.parent_run_id else None
+                ),
                 "child_runs": [self._copy_run(child) for child in run.child_runs],
                 "execution_order": None,
                 "child_execution_order": None,
+                "trace_id": self._replace_uuid(run.trace_id) if run.trace_id else None,
+                "dotted_order": new_dotted_order,
             }
         )
 
@@ -120,6 +134,17 @@ class FakeTracer(BaseTracer):
 
 
 class FakeRunnable(Runnable[str, int]):
+    def invoke(
+        self,
+        input: str,
+        config: Optional[RunnableConfig] = None,
+    ) -> int:
+        return len(input)
+
+
+class FakeRunnableSerializable(RunnableSerializable[str, int]):
+    hello: str = ""
+
     def invoke(
         self,
         input: str,
@@ -295,7 +320,7 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
         "definitions": {
             "AIMessage": {
                 "title": "AIMessage",
-                "description": "A Message from an AI.",
+                "description": "Message from an AI.",
                 "type": "object",
                 "properties": {
                     "content": {
@@ -320,6 +345,8 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["ai"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
+                    "name": {"title": "Name", "type": "string"},
                     "example": {
                         "title": "Example",
                         "default": False,
@@ -330,7 +357,7 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
             },
             "HumanMessage": {
                 "title": "HumanMessage",
-                "description": "A Message from a human.",
+                "description": "Message from a human.",
                 "type": "object",
                 "properties": {
                     "content": {
@@ -355,6 +382,8 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["human"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
+                    "name": {"title": "Name", "type": "string"},
                     "example": {
                         "title": "Example",
                         "default": False,
@@ -365,7 +394,7 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
             },
             "ChatMessage": {
                 "title": "ChatMessage",
-                "description": "A Message that can be assigned an arbitrary speaker (i.e. role).",  # noqa
+                "description": "Message that can be assigned an arbitrary speaker (i.e. role).",  # noqa: E501
                 "type": "object",
                 "properties": {
                     "content": {
@@ -390,13 +419,15 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["chat"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
+                    "name": {"title": "Name", "type": "string"},
                     "role": {"title": "Role", "type": "string"},
                 },
                 "required": ["content", "role"],
             },
             "SystemMessage": {
                 "title": "SystemMessage",
-                "description": "A Message for priming AI behavior, usually passed in as the first of a sequence\nof input messages.",  # noqa
+                "description": "Message for priming AI behavior, usually passed in as the first of a sequence\nof input messages.",  # noqa: E501
                 "type": "object",
                 "properties": {
                     "content": {
@@ -421,12 +452,14 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["system"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
+                    "name": {"title": "Name", "type": "string"},
                 },
                 "required": ["content"],
             },
             "FunctionMessage": {
                 "title": "FunctionMessage",
-                "description": "A Message for passing the result of executing a function back to a model.",  # noqa
+                "description": "Message for passing the result of executing a function back to a model.",  # noqa: E501
                 "type": "object",
                 "properties": {
                     "content": {
@@ -451,13 +484,14 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["function"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
                     "name": {"title": "Name", "type": "string"},
                 },
                 "required": ["content", "name"],
             },
             "ToolMessage": {
                 "title": "ToolMessage",
-                "description": "A Message for passing the result of executing a tool back to a model.",  # noqa
+                "description": "Message for passing the result of executing a tool back to a model.",  # noqa: E501
                 "type": "object",
                 "properties": {
                     "content": {
@@ -482,6 +516,8 @@ def test_schemas(snapshot: SnapshotAssertion) -> None:
                         "enum": ["tool"],
                         "type": "string",
                     },
+                    "id": {"title": "Id", "type": "string"},
+                    "name": {"title": "Name", "type": "string"},
                     "tool_call_id": {"title": "Tool Call Id", "type": "string"},
                 },
                 "required": ["content", "tool_call_id"],
@@ -633,14 +669,11 @@ def test_lambda_schemas() -> None:
     }
 
     second_lambda = lambda x, y: (x["hello"], x["bye"], y["bah"])  # noqa: E731
-    assert (
-        RunnableLambda(second_lambda).input_schema.schema()  # type: ignore[arg-type]
-        == {
-            "title": "RunnableLambdaInput",
-            "type": "object",
-            "properties": {"hello": {"title": "Hello"}, "bye": {"title": "Bye"}},
-        }
-    )
+    assert RunnableLambda(second_lambda).input_schema.schema() == {  # type: ignore[arg-type]
+        "title": "RunnableLambdaInput",
+        "type": "object",
+        "properties": {"hello": {"title": "Hello"}, "bye": {"title": "Bye"}},
+    }
 
     def get_value(input):  # type: ignore[no-untyped-def]
         return input["variable_name"]
@@ -696,7 +729,9 @@ def test_lambda_schemas() -> None:
         }
 
     assert (
-        RunnableLambda(aget_values_typed).input_schema.schema()  # type: ignore[arg-type]
+        RunnableLambda(
+            aget_values_typed  # type: ignore[arg-type]
+        ).input_schema.schema()
         == {
             "title": "aget_values_typed_input",
             "$ref": "#/definitions/InputType",
@@ -1288,6 +1323,30 @@ async def test_passthrough_tap_async(mocker: MockerFixture) -> None:
     mock.reset_mock()
 
 
+async def test_with_config_metadata_passthrough(mocker: MockerFixture) -> None:
+    fake = FakeRunnableSerializable()
+    spy = mocker.spy(fake.__class__, "invoke")
+    fakew = fake.configurable_fields(hello=ConfigurableField(id="hello", name="Hello"))
+
+    assert (
+        fakew.with_config(tags=["a-tag"]).invoke(
+            "hello", {"configurable": {"hello": "there"}, "metadata": {"bye": "now"}}
+        )
+        == 5
+    )
+    assert spy.call_args_list[0].args[1:] == (
+        "hello",
+        dict(
+            tags=["a-tag"],
+            callbacks=None,
+            recursion_limit=25,
+            configurable={"hello": "there"},
+            metadata={"hello": "there", "bye": "now"},
+        ),
+    )
+    spy.reset_mock()
+
+
 async def test_with_config(mocker: MockerFixture) -> None:
     fake = FakeRunnable()
     spy = mocker.spy(fake, "invoke")
@@ -1598,6 +1657,8 @@ async def test_prompt() -> None:
                     ]
                 )
             ],
+            "type": "prompt",
+            "name": "ChatPromptTemplate",
         },
     )
 
@@ -2046,6 +2107,8 @@ async def test_prompt_with_llm(
                     "logs": {},
                     "final_output": None,
                     "streamed_output": [],
+                    "name": "RunnableSequence",
+                    "type": "chain",
                 },
             }
         ),
@@ -2058,7 +2121,7 @@ async def test_prompt_with_llm(
                     "final_output": None,
                     "metadata": {},
                     "name": "ChatPromptTemplate",
-                    "start_time": "2023-01-01T00:00:00.000",
+                    "start_time": "2023-01-01T00:00:00.000+00:00",
                     "streamed_output": [],
                     "streamed_output_str": [],
                     "tags": ["seq:step:1"],
@@ -2080,7 +2143,7 @@ async def test_prompt_with_llm(
             {
                 "op": "add",
                 "path": "/logs/ChatPromptTemplate/end_time",
-                "value": "2023-01-01T00:00:00.000",
+                "value": "2023-01-01T00:00:00.000+00:00",
             },
         ),
         RunLogPatch(
@@ -2092,7 +2155,7 @@ async def test_prompt_with_llm(
                     "final_output": None,
                     "metadata": {},
                     "name": "FakeListLLM",
-                    "start_time": "2023-01-01T00:00:00.000",
+                    "start_time": "2023-01-01T00:00:00.000+00:00",
                     "streamed_output": [],
                     "streamed_output_str": [],
                     "tags": ["seq:step:2"],
@@ -2115,12 +2178,280 @@ async def test_prompt_with_llm(
             {
                 "op": "add",
                 "path": "/logs/FakeListLLM/end_time",
-                "value": "2023-01-01T00:00:00.000",
+                "value": "2023-01-01T00:00:00.000+00:00",
             },
         ),
         RunLogPatch(
             {"op": "add", "path": "/streamed_output/-", "value": "foo"},
             {"op": "replace", "path": "/final_output", "value": "foo"},
+        ),
+    ]
+    assert stream_log == expected
+
+
+@freeze_time("2023-01-01")
+async def test_prompt_with_llm_parser(
+    mocker: MockerFixture, snapshot: SnapshotAssertion
+) -> None:
+    prompt = (
+        SystemMessagePromptTemplate.from_template("You are a nice assistant.")
+        + "{question}"
+    )
+    llm = FakeStreamingListLLM(responses=["bear, dog, cat", "tomato, lettuce, onion"])
+    parser = CommaSeparatedListOutputParser()
+
+    chain: Runnable = prompt | llm | parser
+
+    assert isinstance(chain, RunnableSequence)
+    assert chain.first == prompt
+    assert chain.middle == [llm]
+    assert chain.last == parser
+    assert dumps(chain, pretty=True) == snapshot
+
+    # Test invoke
+    prompt_spy = mocker.spy(prompt.__class__, "ainvoke")
+    llm_spy = mocker.spy(llm.__class__, "ainvoke")
+    parser_spy = mocker.spy(parser.__class__, "ainvoke")
+    tracer = FakeTracer()
+    assert await chain.ainvoke(
+        {"question": "What is your name?"}, dict(callbacks=[tracer])
+    ) == ["bear", "dog", "cat"]
+    assert prompt_spy.call_args.args[1] == {"question": "What is your name?"}
+    assert llm_spy.call_args.args[1] == ChatPromptValue(
+        messages=[
+            SystemMessage(content="You are a nice assistant."),
+            HumanMessage(content="What is your name?"),
+        ]
+    )
+    assert parser_spy.call_args.args[1] == "bear, dog, cat"
+    assert tracer.runs == snapshot
+    mocker.stop(prompt_spy)
+    mocker.stop(llm_spy)
+    mocker.stop(parser_spy)
+
+    # Test batch
+    prompt_spy = mocker.spy(prompt.__class__, "abatch")
+    llm_spy = mocker.spy(llm.__class__, "abatch")
+    parser_spy = mocker.spy(parser.__class__, "abatch")
+    tracer = FakeTracer()
+    assert await chain.abatch(
+        [
+            {"question": "What is your name?"},
+            {"question": "What is your favorite color?"},
+        ],
+        dict(callbacks=[tracer]),
+    ) == [["tomato", "lettuce", "onion"], ["bear", "dog", "cat"]]
+    assert prompt_spy.call_args.args[1] == [
+        {"question": "What is your name?"},
+        {"question": "What is your favorite color?"},
+    ]
+    assert llm_spy.call_args.args[1] == [
+        ChatPromptValue(
+            messages=[
+                SystemMessage(content="You are a nice assistant."),
+                HumanMessage(content="What is your name?"),
+            ]
+        ),
+        ChatPromptValue(
+            messages=[
+                SystemMessage(content="You are a nice assistant."),
+                HumanMessage(content="What is your favorite color?"),
+            ]
+        ),
+    ]
+    assert parser_spy.call_args.args[1] == [
+        "tomato, lettuce, onion",
+        "bear, dog, cat",
+    ]
+    assert tracer.runs == snapshot
+    mocker.stop(prompt_spy)
+    mocker.stop(llm_spy)
+    mocker.stop(parser_spy)
+
+    # Test stream
+    prompt_spy = mocker.spy(prompt.__class__, "ainvoke")
+    llm_spy = mocker.spy(llm.__class__, "astream")
+    tracer = FakeTracer()
+    assert [
+        token
+        async for token in chain.astream(
+            {"question": "What is your name?"}, dict(callbacks=[tracer])
+        )
+    ] == [["tomato"], ["lettuce"], ["onion"]]
+    assert prompt_spy.call_args.args[1] == {"question": "What is your name?"}
+    assert llm_spy.call_args.args[1] == ChatPromptValue(
+        messages=[
+            SystemMessage(content="You are a nice assistant."),
+            HumanMessage(content="What is your name?"),
+        ]
+    )
+
+    prompt_spy.reset_mock()
+    llm_spy.reset_mock()
+    stream_log = [
+        part async for part in chain.astream_log({"question": "What is your name?"})
+    ]
+
+    # remove ids from logs
+    for part in stream_log:
+        for op in part.ops:
+            if (
+                isinstance(op["value"], dict)
+                and "id" in op["value"]
+                and not isinstance(op["value"]["id"], list)  # serialized lc id
+            ):
+                del op["value"]["id"]
+
+    expected = [
+        RunLogPatch(
+            {
+                "op": "replace",
+                "path": "",
+                "value": {
+                    "logs": {},
+                    "final_output": None,
+                    "streamed_output": [],
+                    "name": "RunnableSequence",
+                    "type": "chain",
+                },
+            }
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/ChatPromptTemplate",
+                "value": {
+                    "end_time": None,
+                    "final_output": None,
+                    "metadata": {},
+                    "name": "ChatPromptTemplate",
+                    "start_time": "2023-01-01T00:00:00.000+00:00",
+                    "streamed_output": [],
+                    "streamed_output_str": [],
+                    "tags": ["seq:step:1"],
+                    "type": "prompt",
+                },
+            }
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/ChatPromptTemplate/final_output",
+                "value": ChatPromptValue(
+                    messages=[
+                        SystemMessage(content="You are a nice assistant."),
+                        HumanMessage(content="What is your name?"),
+                    ]
+                ),
+            },
+            {
+                "op": "add",
+                "path": "/logs/ChatPromptTemplate/end_time",
+                "value": "2023-01-01T00:00:00.000+00:00",
+            },
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/FakeStreamingListLLM",
+                "value": {
+                    "end_time": None,
+                    "final_output": None,
+                    "metadata": {},
+                    "name": "FakeStreamingListLLM",
+                    "start_time": "2023-01-01T00:00:00.000+00:00",
+                    "streamed_output": [],
+                    "streamed_output_str": [],
+                    "tags": ["seq:step:2"],
+                    "type": "llm",
+                },
+            }
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/FakeStreamingListLLM/final_output",
+                "value": {
+                    "generations": [
+                        [
+                            {
+                                "generation_info": None,
+                                "text": "bear, dog, cat",
+                                "type": "Generation",
+                            }
+                        ]
+                    ],
+                    "llm_output": None,
+                    "run": None,
+                },
+            },
+            {
+                "op": "add",
+                "path": "/logs/FakeStreamingListLLM/end_time",
+                "value": "2023-01-01T00:00:00.000+00:00",
+            },
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser",
+                "value": {
+                    "end_time": None,
+                    "final_output": None,
+                    "metadata": {},
+                    "name": "CommaSeparatedListOutputParser",
+                    "start_time": "2023-01-01T00:00:00.000+00:00",
+                    "streamed_output": [],
+                    "streamed_output_str": [],
+                    "tags": ["seq:step:3"],
+                    "type": "parser",
+                },
+            }
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser/streamed_output/-",
+                "value": ["bear"],
+            }
+        ),
+        RunLogPatch(
+            {"op": "add", "path": "/streamed_output/-", "value": ["bear"]},
+            {"op": "replace", "path": "/final_output", "value": ["bear"]},
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser/streamed_output/-",
+                "value": ["dog"],
+            }
+        ),
+        RunLogPatch(
+            {"op": "add", "path": "/streamed_output/-", "value": ["dog"]},
+            {"op": "add", "path": "/final_output/1", "value": "dog"},
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser/streamed_output/-",
+                "value": ["cat"],
+            }
+        ),
+        RunLogPatch(
+            {"op": "add", "path": "/streamed_output/-", "value": ["cat"]},
+            {"op": "add", "path": "/final_output/2", "value": "cat"},
+        ),
+        RunLogPatch(
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser/final_output",
+                "value": {"output": ["bear", "dog", "cat"]},
+            },
+            {
+                "op": "add",
+                "path": "/logs/CommaSeparatedListOutputParser/end_time",
+                "value": "2023-01-01T00:00:00.000+00:00",
+            },
         ),
     ]
     assert stream_log == expected
@@ -2193,7 +2524,13 @@ async def test_stream_log_lists() -> None:
             {
                 "op": "replace",
                 "path": "",
-                "value": {"final_output": None, "logs": {}, "streamed_output": []},
+                "value": {
+                    "final_output": None,
+                    "logs": {},
+                    "streamed_output": [],
+                    "name": "list_producer",
+                    "type": "chain",
+                },
             }
         ),
         RunLogPatch(
@@ -2221,12 +2558,14 @@ async def test_stream_log_lists() -> None:
     assert state.state == {
         "final_output": {"alist": ["0", "1", "2", "3"]},
         "logs": {},
+        "name": "list_producer",
         "streamed_output": [
             {"alist": ["0"]},
             {"alist": ["1"]},
             {"alist": ["2"]},
             {"alist": ["3"]},
         ],
+        "type": "chain",
     }
 
 
@@ -3091,6 +3430,26 @@ def test_bind_bind() -> None:
     ) == dumpd(llm.bind(stop=["Observation:"], one="two", hello="world"))
 
 
+def test_bind_with_lambda() -> None:
+    def my_function(*args: Any, **kwargs: Any) -> int:
+        return 3 + kwargs.get("n", 0)
+
+    runnable = RunnableLambda(my_function).bind(n=1)
+    assert 4 == runnable.invoke({})
+    chunks = list(runnable.stream({}))
+    assert [4] == chunks
+
+
+async def test_bind_with_lambda_async() -> None:
+    def my_function(*args: Any, **kwargs: Any) -> int:
+        return 3 + kwargs.get("n", 0)
+
+    runnable = RunnableLambda(my_function).bind(n=1)
+    assert 4 == await runnable.ainvoke({})
+    chunks = [item async for item in runnable.astream({})]
+    assert [4] == chunks
+
+
 def test_deep_stream() -> None:
     prompt = (
         SystemMessagePromptTemplate.from_template("You are a nice assistant.")
@@ -3365,52 +3724,6 @@ async def test_runnable_sequence_atransform() -> None:
 
     assert len(chunks) == len("foo-lish")
     assert "".join(chunks) == "foo-lish"
-
-
-@pytest.fixture()
-def llm_with_fallbacks() -> RunnableWithFallbacks:
-    error_llm = FakeListLLM(responses=["foo"], i=1)
-    pass_llm = FakeListLLM(responses=["bar"])
-
-    return error_llm.with_fallbacks([pass_llm])
-
-
-@pytest.fixture()
-def llm_with_multi_fallbacks() -> RunnableWithFallbacks:
-    error_llm = FakeListLLM(responses=["foo"], i=1)
-    error_llm_2 = FakeListLLM(responses=["baz"], i=1)
-    pass_llm = FakeListLLM(responses=["bar"])
-
-    return error_llm.with_fallbacks([error_llm_2, pass_llm])
-
-
-@pytest.fixture()
-def llm_chain_with_fallbacks() -> Runnable:
-    error_llm = FakeListLLM(responses=["foo"], i=1)
-    pass_llm = FakeListLLM(responses=["bar"])
-
-    prompt = PromptTemplate.from_template("what did baz say to {buz}")
-    return RunnableParallel({"buz": lambda x: x}) | (prompt | error_llm).with_fallbacks(
-        [prompt | pass_llm]
-    )
-
-
-@pytest.mark.parametrize(
-    "runnable",
-    ["llm_with_fallbacks", "llm_with_multi_fallbacks", "llm_chain_with_fallbacks"],
-)
-async def test_llm_with_fallbacks(
-    runnable: RunnableWithFallbacks, request: Any, snapshot: SnapshotAssertion
-) -> None:
-    runnable = request.getfixturevalue(runnable)
-    assert runnable.invoke("hello") == "bar"
-    assert runnable.batch(["hi", "hey", "bye"]) == ["bar"] * 3
-    assert list(runnable.stream("hello")) == ["bar"]
-    assert await runnable.ainvoke("hello") == "bar"
-    assert await runnable.abatch(["hi", "hey", "bye"]) == ["bar"] * 3
-    assert list(await runnable.ainvoke("hello")) == list("bar")
-    if sys.version_info >= (3, 9):
-        assert dumps(runnable, pretty=True) == snapshot
 
 
 class FakeSplitIntoListParser(BaseOutputParser[List[str]]):
@@ -4375,9 +4688,9 @@ async def test_runnable_gen() -> None:
 
     runnable = RunnableGenerator(gen)
 
-    assert runnable.input_schema.schema() == {"title": "RunnableGeneratorInput"}
+    assert runnable.input_schema.schema() == {"title": "gen_input"}
     assert runnable.output_schema.schema() == {
-        "title": "RunnableGeneratorOutput",
+        "title": "gen_output",
         "type": "integer",
     }
 
@@ -4395,6 +4708,323 @@ async def test_runnable_gen() -> None:
     assert await arunnable.ainvoke(None) == 6
     assert [p async for p in arunnable.astream(None)] == [1, 2, 3]
     assert await arunnable.abatch([None, None]) == [6, 6]
+
+
+async def test_runnable_gen_context_config() -> None:
+    """Test that a generator can call other runnables with config
+    propagated from the context."""
+
+    fake = RunnableLambda(len)
+
+    def gen(input: Iterator[Any]) -> Iterator[int]:
+        yield fake.invoke("a")
+        yield fake.invoke("aa")
+        yield fake.invoke("aaa")
+
+    runnable = RunnableGenerator(gen)
+
+    assert runnable.input_schema.schema() == {"title": "gen_input"}
+    assert runnable.output_schema.schema() == {
+        "title": "gen_output",
+        "type": "integer",
+    }
+
+    tracer = FakeTracer()
+    assert runnable.invoke(None, {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert list(runnable.stream(None)) == [1, 2, 3]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert list(runnable.stream(None, {"callbacks": [tracer]})) == [1, 2, 3]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert runnable.batch([None, None], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
+
+    if sys.version_info < (3, 11):
+        # Python 3.10 and below don't support running async tasks in a specific context
+        return
+
+    async def agen(input: AsyncIterator[Any]) -> AsyncIterator[int]:
+        yield await fake.ainvoke("a")
+        yield await fake.ainvoke("aa")
+        yield await fake.ainvoke("aaa")
+
+    arunnable = RunnableGenerator(agen)
+
+    tracer = FakeTracer()
+    assert await arunnable.ainvoke(None, {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert [p async for p in arunnable.astream(None)] == [1, 2, 3]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert [p async for p in arunnable.astream(None, {"callbacks": [tracer]})] == [
+        1,
+        2,
+        3,
+    ]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert await arunnable.abatch([None, None], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
+
+
+async def test_runnable_iter_context_config() -> None:
+    """Test that a generator can call other runnables with config
+    propagated from the context."""
+
+    fake = RunnableLambda(len)
+
+    @chain
+    def gen(input: str) -> Iterator[int]:
+        yield fake.invoke(input)
+        yield fake.invoke(input * 2)
+        yield fake.invoke(input * 3)
+
+    assert gen.input_schema.schema() == {
+        "title": "gen_input",
+        "type": "string",
+    }
+    assert gen.output_schema.schema() == {
+        "title": "gen_output",
+        "type": "integer",
+    }
+
+    tracer = FakeTracer()
+    assert gen.invoke("a", {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert list(gen.stream("a")) == [1, 2, 3]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert list(gen.stream("a", {"callbacks": [tracer]})) == [1, 2, 3]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert gen.batch(["a", "a"], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
+
+    if sys.version_info < (3, 11):
+        # Python 3.10 and below don't support running async tasks in a specific context
+        return
+
+    @chain
+    async def agen(input: str) -> AsyncIterator[int]:
+        yield await fake.ainvoke(input)
+        yield await fake.ainvoke(input * 2)
+        yield await fake.ainvoke(input * 3)
+
+    assert agen.input_schema.schema() == {
+        "title": "agen_input",
+        "type": "string",
+    }
+    assert agen.output_schema.schema() == {
+        "title": "agen_output",
+        "type": "integer",
+    }
+
+    tracer = FakeTracer()
+    assert await agen.ainvoke("a", {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert [p async for p in agen.astream("a")] == [1, 2, 3]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert [p async for p in agen.astream("a", {"callbacks": [tracer]})] == [
+        1,
+        2,
+        3,
+    ]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert [p async for p in agen.astream_log("a", {"callbacks": [tracer]})]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert await agen.abatch(["a", "a"], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
+
+
+async def test_runnable_lambda_context_config() -> None:
+    """Test that a function can call other runnables with config
+    propagated from the context."""
+
+    fake = RunnableLambda(len)
+
+    @chain
+    def fun(input: str) -> int:
+        output = fake.invoke(input)
+        output += fake.invoke(input * 2)
+        output += fake.invoke(input * 3)
+        return output
+
+    assert fun.input_schema.schema() == {"title": "fun_input", "type": "string"}
+    assert fun.output_schema.schema() == {
+        "title": "fun_output",
+        "type": "integer",
+    }
+
+    tracer = FakeTracer()
+    assert fun.invoke("a", {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert list(fun.stream("a")) == [6]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert list(fun.stream("a", {"callbacks": [tracer]})) == [6]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert fun.batch(["a", "a"], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
+
+    if sys.version_info < (3, 11):
+        # Python 3.10 and below don't support running async tasks in a specific context
+        return
+
+    @chain
+    async def afun(input: str) -> int:
+        output = await fake.ainvoke(input)
+        output += await fake.ainvoke(input * 2)
+        output += await fake.ainvoke(input * 3)
+        return output
+
+    assert afun.input_schema.schema() == {"title": "afun_input", "type": "string"}
+    assert afun.output_schema.schema() == {
+        "title": "afun_output",
+        "type": "integer",
+    }
+
+    tracer = FakeTracer()
+    assert await afun.ainvoke("a", {"callbacks": [tracer]}) == 6
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    tracer.runs.clear()
+
+    assert [p async for p in afun.astream("a")] == [6]
+    assert len(tracer.runs) == 0, "callbacks doesn't persist from previous call"
+
+    tracer = FakeTracer()
+    assert [p async for p in afun.astream("a", {"callbacks": [tracer]})] == [6]
+    assert len(tracer.runs) == 1
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+
+    tracer = FakeTracer()
+    assert await afun.abatch(["a", "a"], {"callbacks": [tracer]}) == [6, 6]
+    assert len(tracer.runs) == 2
+    assert tracer.runs[0].outputs == {"output": 6}
+    assert tracer.runs[1].outputs == {"output": 6}
+    assert len(tracer.runs[0].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[0].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[0].child_runs] == [1, 2, 3]
+    assert len(tracer.runs[1].child_runs) == 3
+    assert [r.inputs["input"] for r in tracer.runs[1].child_runs] == ["a", "aa", "aaa"]
+    assert [(r.outputs or {})["output"] for r in tracer.runs[1].child_runs] == [1, 2, 3]
 
 
 async def test_runnable_gen_transform() -> None:
@@ -4421,19 +5051,19 @@ async def test_runnable_gen_transform() -> None:
     achain = RunnableGenerator(gen_indexes, agen_indexes) | aplus_one
 
     assert chain.input_schema.schema() == {
-        "title": "RunnableGeneratorInput",
+        "title": "gen_indexes_input",
         "type": "integer",
     }
     assert chain.output_schema.schema() == {
-        "title": "RunnableGeneratorOutput",
+        "title": "plus_one_output",
         "type": "integer",
     }
     assert achain.input_schema.schema() == {
-        "title": "RunnableGeneratorInput",
+        "title": "gen_indexes_input",
         "type": "integer",
     }
     assert achain.output_schema.schema() == {
-        "title": "RunnableGeneratorOutput",
+        "title": "aplus_one_output",
         "type": "integer",
     }
 
@@ -4553,4 +5183,6 @@ async def test_astream_log_deep_copies() -> None:
         "final_output": 2,
         "logs": {},
         "streamed_output": [2],
+        "name": "add_one",
+        "type": "chain",
     }

@@ -74,6 +74,12 @@ def _import_annoy() -> Any:
     return Annoy
 
 
+def _import_apache_doris() -> Any:
+    from langchain_community.vectorstores.apache_doris import ApacheDoris
+
+    return ApacheDoris
+
+
 def _import_atlas() -> Any:
     from langchain_community.vectorstores.atlas import AtlasDB
 
@@ -102,6 +108,14 @@ def _import_baiducloud_vector_search() -> Any:
     from langchain_community.vectorstores.baiducloud_vector_search import BESVectorStore
 
     return BESVectorStore
+
+
+def _import_bigquery() -> Any:
+    from langchain_community.vectorstores.bigquery_vector_search import (
+        BigQueryVectorSearch,
+    )
+
+    return BigQueryVectorSearch
 
 
 def _import_cassandra() -> Any:
@@ -196,10 +210,22 @@ def _import_faiss() -> Any:
     return FAISS
 
 
+def _import_hanavector() -> Any:
+    from langchain_community.vectorstores.hanavector import HanaDB
+
+    return HanaDB
+
+
 def _import_hologres() -> Any:
     from langchain_community.vectorstores.hologres import Hologres
 
     return Hologres
+
+
+def _import_kdbai() -> Any:
+    from langchain_community.vectorstores.kdbai import KDBAI
+
+    return KDBAI
 
 
 def _import_lancedb() -> Any:
@@ -450,6 +476,18 @@ def _import_zilliz() -> Any:
     return Zilliz
 
 
+def _import_neuraldb() -> Any:
+    from langchain_community.vectorstores.thirdai_neuraldb import NeuralDBVectorStore
+
+    return NeuralDBVectorStore
+
+
+def _import_lantern() -> Any:
+    from langchain_community.vectorstores.lantern import Lantern
+
+    return Lantern
+
+
 def __getattr__(name: str) -> Any:
     if name == "AnalyticDB":
         return _import_analyticdb()
@@ -465,6 +503,8 @@ def __getattr__(name: str) -> Any:
         return _import_elastic_vector_search()
     elif name == "Annoy":
         return _import_annoy()
+    elif name == "ApacheDoris":
+        return _import_apache_doris()
     elif name == "AtlasDB":
         return _import_atlas()
     elif name == "AwaDB":
@@ -473,6 +513,8 @@ def __getattr__(name: str) -> Any:
         return _import_azuresearch()
     elif name == "Bagel":
         return _import_bageldb()
+    elif name == "BigQueryVectorSearch":
+        return _import_bigquery()
     elif name == "BESVectorStore":
         return _import_baiducloud_vector_search()
     elif name == "Cassandra":
@@ -505,8 +547,12 @@ def __getattr__(name: str) -> Any:
         return _import_epsilla()
     elif name == "FAISS":
         return _import_faiss()
+    elif name == "HanaDB":
+        return _import_hanavector()
     elif name == "Hologres":
         return _import_hologres()
+    elif name == "KDBAI":
+        return _import_kdbai()
     elif name == "LanceDB":
         return _import_lancedb()
     elif name == "LLMRails":
@@ -589,6 +635,10 @@ def __getattr__(name: str) -> Any:
         return _import_zilliz()
     elif name == "VespaStore":
         return _import_vespa()
+    elif name == "NeuralDBVectorStore":
+        return _import_neuraldb()
+    elif name == "Lantern":
+        return _import_lantern()
     else:
         raise AttributeError(f"Could not find: {name}")
 
@@ -598,6 +648,7 @@ __all__ = [
     "AlibabaCloudOpenSearchSettings",
     "AnalyticDB",
     "Annoy",
+    "ApacheDoris",
     "AtlasDB",
     "AwaDB",
     "AzureSearch",
@@ -619,7 +670,9 @@ __all__ = [
     "ElasticsearchStore",
     "Epsilla",
     "FAISS",
+    "HanaDB",
     "Hologres",
+    "KDBAI",
     "LanceDB",
     "LLMRails",
     "Marqo",
@@ -663,4 +716,6 @@ __all__ = [
     "TencentVectorDB",
     "AzureCosmosDBVectorSearch",
     "VectorStore",
+    "NeuralDBVectorStore",
+    "Lantern",
 ]
